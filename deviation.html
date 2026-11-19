@@ -765,11 +765,11 @@ function esc(s){return String(s).replace(/[&<>"]/g,function(c){return{'&':'&amp;
  setTimeout(function(){location.reload()},6e5);
 })();
 </script>
-<script type="text/plain" id="rendu">var cur=0,mk=[];
+<script type="text/plain" id="rendu">var cur=0,mk=[],both=DEV.sens.length>1;
 var map=L.map('map',{zoomControl:true,tap:true,zoomSnap:0.25});
 /* fond OpenStreetMap (CARTO exige une clé depuis octobre 2026) : OSM France, puis OSM si bloqué */var fonds=['https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png','https://tile.openstreetmap.org/{z}/{x}/{y}.png'],iF=0,cF;function poserFond(){if(cF)map.removeLayer(cF);var ok=0,ko=0;cF=L.tileLayer(fonds[iF],{maxZoom:19,subdomains:'abc',attribution:'&copy; contributeurs OpenStreetMap'});cF.on('tileload',function(){ok++;});cF.on('tileerror',function(){ko++;if(!ok&&ko>=3&&iF<fonds.length-1){iF++;poserFond();}});cF.addTo(map);if(cF.bringToBack)cF.bringToBack();}poserFond();
 var layer=L.layerGroup().addTo(map),me=null;
-map.on('zoomend',function(){document.getElementById('map').classList.toggle('far',map.getZoom()<16.25)});
+map.on('zoomend',function(){document.getElementById('map').classList.toggle('far',map.getZoom()<16.25);if(both&&window.DEV)show(cur,true)});
 var b=document.getElementById('badge');b.textContent=DEV.ligne;b.style.background=DEV.couleurLigne;
 document.getElementById('lieu').textContent=DEV.lieu;document.getElementById('obj').textContent=DEV.objet;
 document.title='Déviation ligne '+DEV.ligne+' — '+DEV.lieu;
@@ -778,26 +778,37 @@ document.getElementById('when').innerHTML='<div class="w"><small>Du</small><b>'+
 if(!DEV.test)document.getElementById('test').style.display='none';
 document.getElementById('foot').innerHTML='Mise à jour : '+esc(DEV.maj)+'<br>Fond de carte © contributeurs OpenStreetMap.';
 function icon(h,s){return L.divIcon({className:'',html:h,iconSize:[s,s],iconAnchor:[s/2,s/2]})}
-function fit(){var s=DEV.sens[cur];map.fitBounds(L.latLngBounds(s.deviation.concat(s.normal)),{padding:[16,16]})}
+function fit(){var l=[];(both?DEV.sens:[DEV.sens[cur]]).forEach(function(s){l=l.concat(s.deviation,s.normal)});map.fitBounds(L.latLngBounds(l),{padding:[16,16]})}
+/* 20/11/2026 : décalage latéral en pixels (à droite du sens de marche) pour montrer les deux sens côte à côte */
+function decale(t,px){if(t.length<2||!px)return t;var z=map.getZoom(),P=t.map(function(q){return map.project(L.latLng(q[0],q[1]),z)});return P.map(function(q,i){var a=P[Math.max(0,i-1)],b=P[Math.min(P.length-1,i+1)],dx=b.x-a.x,dy=b.y-a.y,n=Math.hypot(dx,dy)||1,u=map.unproject(L.point(q.x-dy/n*px,q.y+dx/n*px),z);return [u.lat,u.lng]})}
 function locate(){if(!navigator.geolocation)return;navigator.geolocation.getCurrentPosition(function(p){var ll=[p.coords.latitude,p.coords.longitude];if(me)map.removeLayer(me);me=L.circleMarker(ll,{radius:8,color:'#fff',weight:3,fillColor:'#2563eb',fillOpacity:1}).addTo(map);map.setView(ll,17)},function(){alert('Position indisponible')},{enableHighAccuracy:true,timeout:8000})}
-function show(i){cur=i;var s=DEV.sens[i];layer.clearLayers();mk=[];document.documentElement.style.setProperty('--c',s.couleur);
- document.querySelectorAll('#seg button').forEach(function(bt,j){bt.style.background=j==i?s.couleur:'transparent';bt.style.color=j==i?'#fff':''});
+function show(i,nf){cur=i;var s=DEV.sens[i];layer.clearLayers();mk=[];document.documentElement.style.setProperty('--c',s.couleur);
+ document.querySelectorAll('#seg button').forEach(function(bt,j){var on=DEV.sens.length>1?(both?j==0:j==i+1):j==i;bt.style.background=on?(both?'#334155':s.couleur):'transparent';bt.style.color=on?'#fff':''});
  if(DEV.zone&&DEV.zone.length){L.polyline(DEV.zone,{color:'#f97316',weight:16,opacity:.55,lineCap:'butt'}).addTo(layer);L.polyline(DEV.zone,{color:'#fff',weight:16,opacity:.8,dashArray:'4 10',lineCap:'butt'}).bindTooltip('Zone de travaux').addTo(layer)}
- L.polyline(s.normal,{color:'#6b7280',weight:4,dashArray:'7 8',opacity:.9}).addTo(layer);
- L.polyline(s.deviation,{color:'#fff',weight:10,opacity:.9}).addTo(layer);
- L.polyline(s.deviation,{color:s.couleur,weight:6}).addTo(layer);
- chevrons(s.deviation,90).forEach(function(c){L.marker(c.p,{icon:icon('<div class="chev" style="transform:rotate('+(c.r-90)+'deg)">›</div>',14),interactive:false}).addTo(layer)});
- s.arrets.forEach(function(a){
+ var lst=both?DEV.sens:[s];
+ lst.forEach(function(t){var off=both?8:0,idx=DEV.sens.indexOf(t),act=!both||idx==i;
+  /* portion fermée : rayée rouge et blanc */
+  var fe=decale(t.normal,off);
+  L.polyline(fe,{color:'#d92d20',weight:7,opacity:.95,lineCap:'butt'}).addTo(layer);
+  L.polyline(fe,{color:'#fff',weight:7,opacity:1,dashArray:'7 7',lineCap:'butt'}).addTo(layer);
+  var dv=decale(t.deviation,off);
+  L.polyline(dv,{color:'#fff',weight:10,opacity:.9}).addTo(layer);
+  L.polyline(dv,{color:t.couleur,weight:6}).addTo(layer);
+  chevrons(dv,90).forEach(function(c){L.marker(c.p,{icon:icon('<div class="chev" style="transform:rotate('+(c.r-90)+'deg)">›</div>',14),interactive:false}).addTo(layer)})});
+ /* 19/11/2026 : arrêts utiles seulement (pas les arrêts des autres lignes longés par la déviation) */
+ var utiles=function(t){var c={};t.arrets.forEach(function(a){if(a.reportVers)c[a.reportVers]=1});return t.arrets.filter(function(a){return a.statut!='dev'||a.l===1||c[a.nom]})};
+ var ARR=utiles(s),ARRMAP=both?[].concat.apply([],DEV.sens.map(utiles)):ARR;
+ ARRMAP.forEach(function(a){
   if(a.statut=='non')L.marker(a.pos,{icon:icon('<div class="xm">×</div>',22)}).bindTooltip(a.nom,{permanent:true,direction:'top',offset:[0,-10],className:'lbl no'}).addTo(layer);
   else if(a.statut=='dev')L.circleMarker(a.pos,{radius:8,color:'#0b7a3e',weight:4,fillColor:'#fff',fillOpacity:1}).bindTooltip(a.nom,{permanent:true,direction:'bottom',offset:[0,8],className:'lbl dv'}).addTo(layer);
   else L.circleMarker(a.pos,{radius:9,color:'#fff',weight:3,fillColor:'#0b7a3e',fillOpacity:1}).bindTooltip(a.nom,{permanent:true,direction:'top',offset:[0,-8],className:'lbl'}).addTo(layer)});
  s.etapes.forEach(function(e,k){mk.push(L.marker(e.pos,{icon:icon('<div class="num" style="background:'+s.couleur+'">'+(k+1)+'</div>',26),zIndexOffset:1000}).on('click',function(){pick(k)}).addTo(layer))});
- fit();
+ if(!nf)fit();
  var c=calc(DEV,s);
  document.getElementById('steps').innerHTML=s.etapes.map(function(e,k){return '<li onclick="pick('+k+')"><div class="n" style="background:'+s.couleur+'">'+(k+1)+'</div><div>'+e.txt+'<br><a class="sv" href="'+rue(s,e.pos)+'" target="_blank" rel="noopener" onclick="event.stopPropagation();return !(window.voirRue&&window.voirRue('+k+'))">👁 Voir la rue</a></div></li>'}).join('');
- var f=function(t){return s.arrets.filter(function(a){return a.statut==t})},pl=function(l,c){return l.map(function(a){return '<span class="p '+c+'">'+esc(a.nom)+'</span>'}).join('')};
+ var f=function(t){return ARR.filter(function(a){return a.statut==t})},pl=function(l,c){return l.map(function(a){return '<span class="p '+c+'">'+esc(a.nom)+'</span>'}).join('')};
  document.getElementById('pills').innerHTML='<b>Arrêts non desservis</b>'+pl(f('non'),'no')+'<b>Arrêts de report</b>'+pl(f('report'),'ok')+'<b>Desservi pendant la déviation</b>'+pl(f('dev'),'dv')+'<div style="font-size:12.5px;color:#5b6678;margin-top:4px">Tous les arrêts sont à desservir sur la déviation.</div>';
- document.getElementById('leg').innerHTML='<span><i style="border-color:'+s.couleur+'"></i>Déviation</span><span><i style="border-color:#6b7280;border-top-style:dashed"></i>Itinéraire habituel fermé</span><span><span class="num mini" style="background:'+s.couleur+'">1</span>Indication</span><span><span class="xm mini">×</span>Arrêt non desservi</span><span><span class="dot" style="background:#0b7a3e;border:2px solid #fff;box-shadow:0 0 0 1px #0b7a3e"></span>Arrêt de report</span><span><span class="dot" style="border:3px solid #0b7a3e;background:#fff"></span>Arrêt desservi</span>'+(DEV.zone&&DEV.zone.length?'<span><i style="border-color:#f97316;border-top-width:8px;opacity:.6"></i>Travaux</span>':'');
+ document.getElementById('leg').innerHTML='<span><i style="border-color:'+s.couleur+'"></i>Déviation</span><span><i style="border:0;height:6px;background:repeating-linear-gradient(90deg,#d92d20 0 6px,#fff 6px 12px);box-shadow:0 0 0 1px #d92d20"></i>Portion fermée</span>'+(both?'<span><i style="border-color:'+DEV.sens[0].couleur+'"></i>'+esc(DEV.sens[0].nom)+'</span><span><i style="border-color:'+DEV.sens[1].couleur+'"></i>'+esc(DEV.sens[1].nom)+'</span>':'')+'<span><span class="num mini" style="background:'+s.couleur+'">1</span>Indication</span><span><span class="xm mini">×</span>Arrêt non desservi</span><span><span class="dot" style="background:#0b7a3e;border:2px solid #fff;box-shadow:0 0 0 1px #0b7a3e"></span>Arrêt de report</span><span><span class="dot" style="border:3px solid #0b7a3e;background:#fff"></span>Arrêt desservi</span>'+(DEV.zone&&DEV.zone.length?'<span><i style="border-color:#f97316;border-top-width:8px;opacity:.6"></i>Travaux</span>':'');
 }
 /* « Voir la rue » : Street View 25 m avant le virage, orienté dans le sens de marche du bus (lien Google Maps, sans clé) */
 function rue(s,p){var t=s.deviation||[],d=function(a,b){var kx=Math.cos(a[0]*Math.PI/180)*111195;return Math.hypot((a[0]-b[0])*111195,(a[1]-b[1])*kx)};
@@ -808,7 +819,7 @@ function rue(s,p){var t=s.deviation||[],d=function(a,b){var kx=Math.cos(a[0]*Mat
  var cap=(Math.atan2((c[1]-v[1])*Math.cos(v[0]*Math.PI/180),c[0]-v[0])*180/Math.PI+360)%360;
  return 'https://www.google.com/maps/@?api=1&map_action=pano&viewpoint='+v[0].toFixed(6)+','+v[1].toFixed(6)+'&heading='+Math.round(cap)+'&pitch=0&fov=80'}
 function pick(k){document.querySelectorAll('#steps li').forEach(function(li,j){li.classList.toggle('on',j==k)});map.setView(DEV.sens[cur].etapes[k].pos,18);document.getElementById('map').scrollIntoView({behavior:'smooth',block:'center'})}
-document.getElementById('seg').innerHTML=DEV.sens.map(function(s,i){return '<button onclick="show('+i+')">'+esc(s.nom)+(DEV.sens.length<2?' · seul sens tracé':'')+'</button>'}).join('');
+document.getElementById('seg').innerHTML=(DEV.sens.length>1?'<button onclick="both=true;show(cur)">⇄ Les deux sens</button>':'')+DEV.sens.map(function(s,i){return '<button onclick="both=false;show('+i+')">'+esc(s.nom)+(DEV.sens.length<2?' · seul sens tracé':'')+'</button>'}).join('');
 show(0);
 </script>
 <div id="video"><div class="barre"><b id="vTitre">Déviation en vidéo</b><button type="button" class="vert" id="vPause" onclick="pauseVideo()">⏸ Pause</button><button type="button" id="vVite" onclick="accelererVideo()">⏩ ×2</button><button type="button" onclick="fermerVideo()">✕ Fermer</button></div>
